@@ -1,257 +1,199 @@
-# Placement Agent 🎓📬
+# Placement Agent
 
-An automated agent that watches your Gmail inbox for placement/internship-related
-emails and sends you an instant alert on Telegram — so you never miss a
-shortlist, drive announcement, or interview call buried in a busy inbox.
+An automated system that watches a Gmail inbox for placement/internship-related emails and sends an instant alert via Telegram — so you never miss a shortlist, drive announcement, or interview call buried in a busy inbox.
 
-## How it works
+This project has **two alert paths**, which can be used together or independently:
 
-1. Logs into your Gmail via IMAP and checks for new emails on a timer.
-2. Classifies each new email as "important" or not, using:
+| Path | Delay | Cost | Complexity |
+|---|---|---|---|
+| **A. GitHub Actions polling** | Up to 10 minutes | Free | Simple |
+| **B. Google Cloud real-time push** | Near-instant (seconds) | Free (low usage) | Moderate |
+
+Path A is the original, simpler system. Path B was added later for true real-time alerts. Path A also acts as Path B's backup — if the Cloud system ever breaks, you're still covered within 10 minutes.
+
+---
+
+## How It Works
+
+1. **Detection** — new email arrives in Gmail.
+2. **Classification** (`classifier.py`) — checked against:
    - A trusted senders list (e.g. your college's placement cell address)
-   - A keyword scan (e.g. "shortlisted", "interview", "drive") with
-     exclusions for common false positives (e.g. exam/hostel notices)
-3. Sends a Telegram message for anything flagged important.
-4. Remembers what it's already checked, so you're never alerted twice.
-
-It runs automatically in the cloud via GitHub Actions every 10 minutes —
-you don't need to keep your laptop or any script running.
-
-## ⚠️ A note if you're not from VIT-AP
-
-The trusted sender list and keyword list in this project were built by
-reading through the original author's own VIT-AP inbox, so they're tuned
-to how VIT-AP's CDC (Career Development Centre) and recruiters phrase things.
-
-If you go to a different college or company, don't just use these as-is —
-your placement cell's email address will be different, and the wording
-your recruiters use might differ too.
-
-**What to do instead:**
-1. Pull a sample of your own placement/internship emails (subjects + sender
-   addresses are enough).
-2. Feed them to any AI model (ChatGPT, Claude, etc.) and ask it to suggest
-   a list of trusted sender addresses and keywords based on your samples.
-3. Open `classifier.py` and update these two lists near the top of the file:
-   - `TRUSTED_SENDERS` — add your placement cell's real email address(es)
-   - `PLACEMENT_KEYWORDS` — add/remove keywords to match your emails
-   - (optional) `EXCLUDE_KEYWORDS` — add any false-positive terms you notice
-
-## Prerequisites
-
-Before you start, make sure you have:
-
-- Python 3.9 or newer installed
-- A Gmail account (the one that receives placement emails)
-- A Telegram account (free, just the app or web)
-- A GitHub account (free)
-- 10–15 minutes for one-time setup
+   - A keyword scan (e.g. "shortlisted", "interview", "drive") with exclusions for common false positives (e.g. exam/hostel notices)
+3. **Alert** (`notifier.py` / Cloud Function) — a Telegram message is sent if the email is flagged important.
 
 ---
 
-## Step 1: Get a Gmail App Password
+## Path A: GitHub Actions (Polling)
 
-Gmail won't let this script log in with your normal password — you need
-a special 16-character "App Password" instead. Here's how to get one:
+Runs automatically in the cloud every 10 minutes, checking your inbox via IMAP. No laptop or server needs to stay on.
 
-1. Go to your Google Account: https://myaccount.google.com/
-2. In the left sidebar, click **Security**.
-3. Under "How you sign in to Google," make sure **2-Step Verification**
-   is turned ON. (App Passwords only work if this is enabled — turn it
-   on first if it isn't already.)
-4. Once 2-Step Verification is on, search for **"App passwords"** in the
-   search bar at the top of the Google Account page (or go directly to
-   https://myaccount.google.com/apppasswords).
-5. Under "App name," type something like `Placement Agent` and click
-   **Create**.
-6. Google will show you a 16-character password (e.g. `abcd efgh ijkl mnop`).
-   **Copy it now** — you won't be able to see it again later.
-7. You'll paste this into your `.env` file (local testing) and/or GitHub
-   Secrets (for the automated version) in a later step.
+### Why this is free
+GitHub Actions gives every account **2,000 free minutes/month** on private repos (unlimited on public repos). A single inbox check takes a few seconds, so checking every 10 minutes uses only a small fraction of this — this workflow will never come close to the free limit under normal use.
 
-> 🔒 This app password only works for this one app and can be revoked
-> anytime from the same App Passwords page — it never exposes your
-> actual Google account password.
+### Setup
 
----
-
-## Step 2: Create a Telegram bot
-
-1. Open Telegram (app or web: https://web.telegram.org/) and search for
-   **@BotFather** — it's the official bot that creates other bots.
-2. Start a chat with BotFather and send the command:
+1. Fork this repository, then clone your fork:
    ```
-   /newbot
-   ```
-3. It will ask you to choose a **name** for your bot (this can be
-   anything, e.g. `My Placement Agent`).
-4. Then it will ask for a **username** for your bot — this must be
-   unique and end in `bot` (e.g. `myplacementagent_bot`).
-5. BotFather will reply with a message containing your **bot token** —
-   a long string like:
-   ```
-   123456789:ABCdefGhIJKlmNoPQRstuVwxYZ
-   ```
-   Copy this — you'll need it later.
-
-## Step 3: Get your Telegram Chat ID
-
-Your bot needs to know *where* to send messages — that's your Chat ID.
-
-1. In Telegram, search for the bot you just created (by the username
-   you gave it) and click **Start** (or send it any message, e.g. "hi").
-   This step is required — Telegram won't let a bot message you until
-   you've messaged it first.
-2. Open this URL in your browser, replacing `<YOUR_BOT_TOKEN>` with the
-   token from BotFather:
-   ```
-   https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
-   ```
-3. You'll see a chunk of JSON text. Look for a section like:
-   ```json
-   "chat":{"id":123456789,"first_name":"Your Name", ...}
-   ```
-4. That number next to `"id"` is your **Chat ID**. Copy it.
-
-> If you see an empty result (`"result":[]`), it means Step 1 wasn't
-> done — go back and message your bot first, then reload the URL.
-
----
-
-## Step 4: Set up the project locally (recommended, to test before automating)
-
-1. **Fork this repository**, then clone your fork:
-   ```bash
    git clone <your-fork-url>
    cd Placement_Agent
    ```
-
-2. **Create a virtual environment** (keeps this project's packages separate
-   from other Python projects on your machine):
-   ```bash
-   python -m venv venv
+2. Create and activate a virtual environment:
    ```
-
-3. **Activate it:**
-   - Windows:
-     ```bash
-     venv\Scripts\activate
-     ```
-   - Mac/Linux:
-     ```bash
-     source venv/bin/activate
-     ```
-
-4. **Install dependencies:**
-   ```bash
+   python -m venv venv
+   venv\Scripts\activate      # Windows
+   source venv/bin/activate   # Mac/Linux
+   ```
+3. Install dependencies:
+   ```
    pip install -r requirements.txt
    ```
-
-5. **Create your `.env` file:**
-   - Copy the template:
-     ```bash
-     cp .env.example .env
-     ```
-     (On Windows, use `copy .env.example .env` instead.)
-   - Open `.env` in any text editor and fill in the four values you
-     collected in Steps 1–3:
-     ```
-     EMAIL_ADDRESS=youremail@gmail.com
-     EMAIL_APP_PASSWORD=your16charapppassword
-     TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstuVwxYZ
-     TELEGRAM_CHAT_ID=123456789
-     ```
-   - Save the file. **Never share this file or commit it to git** —
-     it's already excluded via `.gitignore`.
-
-6. **Test the email connection:**
-   ```bash
-   python email_checker.py
+4. Get a **Gmail App Password**: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (requires 2-Step Verification enabled).
+5. Create a **Telegram bot** via [@BotFather](https://t.me/BotFather) → `/newbot` → copy the bot token.
+6. Get your **Telegram Chat ID**: message your new bot once, then visit:
    ```
-   You should see your 10 most recent emails printed to the console.
-
-7. **Test the Telegram connection:**
-   ```bash
-   python notifier.py
+   https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
    ```
-   You should get a message on Telegram from your bot.
+   and copy the `chat.id` value.
+7. In your GitHub fork: **Settings → Secrets and variables → Actions**, add:
 
-8. **Run the classifier test** (see which of your real emails would
-   get flagged, without sending any alerts):
-   ```bash
-   python run_filter.py
-   ```
+   | Secret name | Value |
+   |---|---|
+   | `EMAIL_ADDRESS` | your Gmail address |
+   | `EMAIL_APP_PASSWORD` | your 16-character Gmail App Password |
+   | `TELEGRAM_BOT_TOKEN` | your bot token |
+   | `TELEGRAM_CHAT_ID` | your chat ID |
 
-9. **Run the full agent locally (optional):**
-   ```bash
-   python main.py
-   ```
-   It will check your inbox every 15 minutes and alert you on Telegram
-   for anything important, for as long as this script keeps running.
+8. Go to the **Actions** tab and enable workflows if prompted (disabled by default on forks).
+
+That's it — `.github/workflows/check_inbox.yml` now runs every 10 minutes automatically. Trigger it manually anytime via **Actions → Check Placement Emails → Run workflow**.
+
+> ⚠️ **Note:** GitHub does not guarantee exact cron timing — scheduled runs can be delayed during high platform load. Also, if a repo has zero activity for 60 days, GitHub auto-disables its scheduled workflows until manually re-enabled.
 
 ---
 
-## Step 5: Running this automatically with GitHub Actions (recommended, free)
+## Path B: Google Cloud Real-Time Push
 
-This repo includes a GitHub Actions workflow that checks your inbox every
-10 minutes automatically, forever, for free — no need to keep your laptop
-or any script running.
+Instead of checking the inbox every 10 minutes, this path uses Gmail's **push notifications** — Gmail tells Google Cloud the *instant* a new email arrives, which triggers an alert within seconds.
 
-1. Make sure you've **forked this repository** to your own GitHub account
-   (click "Fork" at the top of the repo page, if you haven't already).
+### Architecture
 
-2. In **your fork**, go to **Settings → Secrets and variables → Actions**.
+```
+Gmail inbox (new email)
+      │
+      ▼
+Gmail API "watch" → Pub/Sub Topic (gmail-notifications)
+      │
+      ▼
+Pub/Sub Push Subscription
+      │
+      ▼
+Cloud Run Function (gmail-notification-handler)
+      │
+      ├─ Fetches new message(s) via History API
+      ├─ Runs classify_email() logic
+      └─ Sends Telegram alert if important
+```
 
-3. Click **New repository secret** and add each of these one at a time
-   (using the same values from Steps 1–3 above):
+### Why this stays free (mostly)
+Cloud Run's free tier includes **2 million requests/month** and generous compute time. This project realistically triggers a handful of times a day — nowhere close to the limit. Google **does** require a billing account and a one-time minimum prepayment (varies by region, e.g. ₹1,000) to activate certain APIs, even for free-tier usage — this acts as identity verification, not a recurring charge. Actual monthly cost for this project's usage is effectively ₹0.
 
-   | Secret name           | Value                                  |
-   |-----------------------|------------------------------------------|
-   | `EMAIL_ADDRESS`       | your Gmail address                       |
-   | `EMAIL_APP_PASSWORD`  | your 16-character Gmail App Password     |
-   | `TELEGRAM_BOT_TOKEN`  | your bot token from BotFather             |
-   | `TELEGRAM_CHAT_ID`    | your Telegram chat ID                    |
+**Cost safety nets set up:**
+- Billing budget alert (e.g. ₹100 threshold) — emails you if costs ever approach even a tiny amount
+- Post-pay billing threshold (e.g. ₹2,000) — caps how much could ever be charged before you're notified
 
-4. Go to the **Actions** tab of your fork, and enable workflows if
-   prompted (forks have Actions disabled by default for safety).
+### One-time setup summary
 
-5. That's it — the workflow will now run automatically every 10 minutes.
-   You can also trigger it manually anytime: go to **Actions → Check
-   Placement Emails → Run workflow**.
+1. **Google Cloud project** created (`placement-email-alerts`), Gmail API enabled.
+2. **OAuth consent screen** configured (External, Testing mode) + Gmail `readonly` scope added.
+3. **OAuth credentials** (Desktop app type) downloaded as `credentials.json`; authorized once locally via a Python script to produce `token.json` (contains a long-lived refresh token).
+4. **Pub/Sub topic** `gmail-notifications` created; Gmail's system account (`gmail-api-push@system.gserviceaccount.com`) granted **Pub/Sub Publisher** on it.
+5. **Cloud Run Function** (`gmail-notification-handler`, Python 3.13, `asia-south1`) deployed with:
+   - Entry point: `gmail_push_handler`
+   - Environment variables: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GMAIL_TOKEN_JSON`
+   - Authentication required (IAM)
+6. **Pub/Sub push subscription** (`gmail-notifications-sub`) created, pointing at the function's URL, authenticated via the project's default service account.
+7. Pub/Sub's service account granted **Cloud Run Invoker** on the function (via IAM).
+8. Gmail's `watch()` API called once to start publishing inbox changes to the topic.
 
-> 🔒 These secrets are encrypted by GitHub and never visible in your code,
-> logs, or commit history — not even to you after you save them (you can
-> only overwrite them, not view them again).
+### The 7-day renewal requirement
+
+Gmail's `watch()` subscription **expires after 7 days** — this is a hard Google limitation, not a bug. If not renewed, notifications silently stop (no error is thrown; alerts just stop arriving).
+
+**This is handled automatically** via a second GitHub Actions workflow (`.github/workflows/renew_watch.yml`) that re-runs `start_watch.py` every Monday, refreshing the subscription indefinitely. Requires a `GMAIL_TOKEN_JSON` secret set in the same GitHub repo (Settings → Secrets and variables → Actions).
+
+You can also trigger this manually anytime via **Actions → Renew Gmail Watch → Run workflow**.
 
 ---
 
-## Project structure
+## Project Structure
 
-| File                        | Purpose                                                        |
-|-----------------------------|------------------------------------------------------------------|
-| `main.py`                   | Runs continuously, checks inbox on a timer (for local/manual use) |
-| `run_once.py`                | Runs a single check and exits (used by GitHub Actions)           |
-| `email_checker.py`          | Connects to Gmail via IMAP, fetches recent emails                |
-| `classifier.py`             | Decides which emails are placement-relevant                     |
-| `notifier.py`               | Sends alerts to Telegram                                         |
-| `run_filter.py`             | Test script — shows which recent emails would be flagged, without sending alerts |
-| `requirements.txt`          | Python package dependencies                                      |
-| `.env.example`              | Template showing which environment variables you need           |
-| `.env`                      | Your real credentials (never committed — see `.gitignore`)      |
-| `seen_emails.txt`           | Auto-updated log of already-processed emails, kept in sync by GitHub Actions |
-| `.github/workflows/check_inbox.yml` | The GitHub Actions workflow that runs everything automatically |
+| File | Purpose |
+|---|---|
+| `main.py` | Runs continuously, checks inbox on a timer (local/manual use, Path A) |
+| `run_once.py` | Runs a single check and exits (used by GitHub Actions, Path A) |
+| `email_checker.py` | Connects to Gmail via IMAP, fetches recent emails (Path A) |
+| `classifier.py` | Decides which emails are placement-relevant (shared logic) |
+| `notifier.py` | Sends alerts to Telegram (Path A) |
+| `run_filter.py` | Test script — shows which recent emails would be flagged, without alerting |
+| `start_watch.py` | Starts/renews the Gmail push notification subscription (Path B) |
+| `requirements.txt` | Python package dependencies |
+| `.env.example` | Template for local environment variables |
+| `.env` | Real local credentials (never committed) |
+| `seen_emails.txt` | Auto-updated log of processed emails (Path A dedup) |
+| `.github/workflows/check_inbox.yml` | GitHub Actions — polls inbox every 10 minutes (Path A) |
+| `.github/workflows/renew_watch.yml` | GitHub Actions — renews Gmail watch weekly (Path B) |
+
+The Cloud Function's source code (deployed directly via Google Cloud Console) mirrors the logic in `classifier.py` and `notifier.py`, adapted to read credentials from environment variables instead of local files.
+
+---
+
+## Customizing the Filter
+
+The trusted sender list and keyword list are tuned to one college's placement cell (VIT-AP CDC). If you're using this elsewhere:
+
+1. Pull a sample of your own placement/internship emails (subjects + sender addresses).
+2. Feed them to an AI model and ask for suggested trusted senders and keywords based on your samples.
+3. Open `classifier.py` and update:
+   - `TRUSTED_SENDERS` — your placement cell's real email address(es)
+   - `PLACEMENT_KEYWORDS` — keywords matching your emails
+   - `EXCLUDE_KEYWORDS` — false-positive terms to exclude
+4. If using Path B, also update the same three lists inside the Cloud Function's source (Cloud Run → your service → Source tab).
+
+---
+
+## Security Notes
+
+- **Gmail access is read-only** (`gmail.readonly` scope) — this project can never send, delete, or modify anything in your inbox.
+- Credentials (`token.json`, App Password, bot token) should never be committed to Git or shared — they're excluded via `.gitignore` locally, and stored as encrypted Secrets on GitHub / environment variables on Cloud Run.
+- If any credential is ever accidentally exposed (e.g. pasted somewhere, shared in a screenshot):
+  - **Gmail token**: revoke at [myaccount.google.com/permissions](https://myaccount.google.com/permissions), then re-run `authorize.py` for a fresh one.
+  - **Telegram bot token**: revoke and regenerate via [@BotFather](https://t.me/BotFather) → `/mybots` → your bot → **API Token** → **Revoke current token**.
+
+---
 
 ## Troubleshooting
 
-- **No emails printed by `email_checker.py`:** double-check your Gmail
-  address and App Password in `.env` — a regular Gmail password will
-  not work.
-- **Telegram test message not arriving:** make sure you sent your bot a
-  message (e.g. "hi") before running `notifier.py` — bots can't message
-  you first.
-- **GitHub Actions workflow not running:** confirm Actions are enabled
-  for your fork (Step 5.4) and that all four secrets are spelled exactly
-  as shown in the table above.
-- **Nothing gets flagged as important:** run `python classifier.py`
-  directly — it includes sample test cases to sanity-check your keyword
-  list is working as expected.
+**Path A (GitHub Actions polling)**
+- No emails printed by `email_checker.py`: double-check Gmail address and App Password in `.env`.
+- Telegram test message not arriving: make sure you've messaged your bot at least once.
+- Workflow not running: confirm Actions are enabled on your fork, and all four secrets are spelled exactly right.
+
+**Path B (Cloud push)**
+- No alerts arriving, but no errors either: check Cloud Run → **Observability/Logs** for the timestamp of the email — confirm the function ran, what it classified the email as, and whether Telegram accepted the message.
+- Alerts stopped after ~7 days: the Gmail watch likely expired — check the **Actions** tab for `renew_watch.yml`'s run history, or manually run `python start_watch.py` locally.
+- `500 Internal Server Error` when testing manually: check Logs for a Python traceback — most often caused by a missing/malformed environment variable.
+- Telegram `400 Bad Request: can't parse entities`: sender names/subjects containing `<`, `>`, or `&` must be HTML-escaped before sending (already handled in the current Cloud Function code via `html.escape()`).
+
+---
+
+## Costs Summary
+
+| Component | Typical Monthly Cost |
+|---|---|
+| GitHub Actions (both workflows) | ₹0 (well within free tier) |
+| Gmail API | ₹0 (free) |
+| Cloud Pub/Sub | ₹0 (free tier covers this volume) |
+| Cloud Run Function | ₹0 (free tier covers this volume) |
+| Google Cloud billing account | One-time ₹1,000 prepayment (verification only, not a fee) |
+
+Total ongoing cost for typical personal use: **effectively free**, once the one-time Google Cloud prepayment is made.
